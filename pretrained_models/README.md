@@ -1,0 +1,1 @@
+The Pretrained Model of SynPROTAC is avaliable from https://figshare.com/account/items/30446639/edit.
