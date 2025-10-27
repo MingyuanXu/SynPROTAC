@@ -1,5 +1,0 @@
-{
-    "CUDA_VISIBLE_DEVICES":"0",
-    "batchsize":64,
-    "learning_rate":1e-4
-}
