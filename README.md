@@ -16,3 +16,26 @@ SynPROTAC installation:
 
 	pip install -e .
 
+Training:
+
+	cd scripts/train
+
+	python train.py -i ctrl.json 
+
+Here, we only provide a simple toy dataset to test the training workflow. The whole 20 millions of synthesizable routes is about 80G in cloud, it can be download from https://figshare.com/articles/journal_contribution/The_pretrained_model_of_SynPROTAC_/30446639 soon. 
+
+Sample:
+	cd scripts/sample 
+	python sample.py -i ctrl.json 
+	python show_path.py 
+
+The pretrained model are avaliable from  https://figshare.com/articles/journal_contribution/The_pretrained_model_of_SynPROTAC_/30446639. it should be moved to the ../../pretrained_models.  
+
+Eval:
+	cd scripts/eval 
+	python eval.py -i ctrl.json 
+
+Reinforcement Learning
+	cd scripts/rl
+	python rl.py -i ctrl.json 
+
