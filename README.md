@@ -44,6 +44,5 @@ Reinforcement Learning:
 	
 	cd scripts/rl
 
-	python -u rl.py -i ctrl.json 
 	python rl.py -i ctrl.json 
 
