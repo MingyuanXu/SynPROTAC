@@ -41,7 +41,7 @@ Eval:
 
 Reinforcement Learning
 
-	cd scripts/rl
+	cd scripts/rl/2D_similarity or cd scripts/rl/Constrained_Docking
 
 	python rl.py -i ctrl.json 
 
