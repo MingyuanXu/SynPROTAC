@@ -36,13 +36,15 @@ class BaseScore:
     """Base class for molecular scoring components."""
     def __init__(self,):
         pass 
-    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0):
+    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0, rank: int = 0):
         """Compute scores for a list of molecules. Subclasses must implement this."""
         raise NotImplementedError
 
 class QEDScore(BaseScore):
     """Compute QED (Quantitative Estimate of Drug-likeness) scores."""
-    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0):
+    def __init__(self):
+        self.name="QED"
+    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0, rank: int = 0):
         qed_scores = []
         for mol in mols:
             if mol:
@@ -62,8 +64,9 @@ class SimilarityScore(BaseScore):
         self.target_fps = [AllChem.GetMorganFingerprint(mol, 2, useCounts=True, useFeatures=True) for mol in self.target_mols if mol]
         self.tanimoto_k = tanimoto_k
         self.cutoff = cutoff
+        self.name="2D Similarity"
     
-    def compute_scores(self, mols: List[Chem.Mol],subset_id: int = 0): 
+    def compute_scores(self, mols: List[Chem.Mol],subset_id: int = 0, rank: int = 0 ): 
         scores=[]
         similarities = []
         for mol in mols:
@@ -77,4 +80,5 @@ class SimilarityScore(BaseScore):
                 score = 0.0
             scores.append(score)
             similarities.append(max_sim)
+        print (similarities)
         return torch.tensor(scores), torch.tensor(similarities)

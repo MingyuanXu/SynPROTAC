@@ -442,7 +442,7 @@ class SynthesisRouteLightningModule(pl.LightningModule):
         #print (action_types_logits)
 
         next_action_type = self.sample_action_types(action_types_logits,action_types_masks)
-        print ('next_action_type',next_action_type)
+        #print ('next_action_type',next_action_type)
 
         reaction_masks = self.generate_reaction_mask(next_action_type).to(reaction_logits)
         #print ('reaction_masks',reaction_masks.shape,reaction_masks.sum(dim=-1))
@@ -595,14 +595,14 @@ class SynthesisRouteLightningModule(pl.LightningModule):
                     reaction_type="e3_connection"
                 else:
                     reaction_type="building_block"
-                print (f"Current molecule {i}: {fromstate}, step {int(self.current_step_id[i].clone().detach().item())}, reaction {template}, reagent {reagent}, reaction_type {reaction_type}")
+                #print (f"Current molecule {i}: {fromstate}, step {int(self.current_step_id[i].clone().detach().item())}, reaction {template}, reagent {reagent}, reaction_type {reaction_type}")
                 if template is not None and reagent is not None:
                     fromstate_mol = Chem.MolFromSmiles(fromstate)
                     reagent_mol=Chem.MolFromSmiles(reagent)
                     product=template.excute(fromstate_mol,reagent_mol)
 
-                    print (f"**************")
-                    print (i,product,reaction_type)
+                    #print (f"**************")
+                    #print (i,product,reaction_type)
 
                     if len(product)>0:
                         self.current_smiles[i] = Chem.MolToSmiles(product[0])
@@ -631,10 +631,10 @@ class SynthesisRouteLightningModule(pl.LightningModule):
                             self.current_rollback_steps[i] = 2
         return
 
-    def show_current_environment(self):
-        for i in range(len(self.current_smiles)):
-            print (f"*******************Molecule {i}**********************")
-            print (self.current_smiles[i])
-            print (self.current_reactions[i])
-            print (self.current_reagents[i])
+    #def show_current_environment(self):
+    #    for i in range(len(self.current_smiles)):
+    #        print (f"*******************Molecule {i}**********************")
+    #        print (self.current_smiles[i])
+    #        print (self.current_reactions[i])
+    #        print (self.current_reagents[i])
 

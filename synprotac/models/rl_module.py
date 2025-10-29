@@ -55,6 +55,8 @@ class MolecularScorer:
         actual_scores_dict={}
 
         for func in self.score_functions:
+            if func.name == "2D Similarity":
+                mols=[Chem.MolFromSmiles(Chem.MolToSmiles(mol)) if mol else None for mol in mols]
             dealed_scores, actual_scores = func.compute_scores(mols, subset_id=subset_id, rank=rank)
             actual_scores_dict[func.name]=actual_scores
             scores=dealed_scores*unique_mask*valid_mask
