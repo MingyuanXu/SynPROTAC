@@ -55,8 +55,6 @@ class MolecularScorer:
         actual_scores_dict={}
 
         for func in self.score_functions:
-            if func.name == "2D Similarity":
-                mols=[Chem.MolFromSmiles(Chem.MolToSmiles(mol)) if mol else None for mol in mols]
             dealed_scores, actual_scores = func.compute_scores(mols, subset_id=subset_id, rank=rank)
             actual_scores_dict[func.name]=actual_scores
             scores=dealed_scores*unique_mask*valid_mask
@@ -515,6 +513,8 @@ class RL_LightningModule(pl.LightningModule):
         softmax=torch.nn.Softmax(dim=-1)
         action_types_logits_agent = softmax(action_types_logits_agent)
         action_types_logits_prior = softmax(action_types_logits_prior)
+        action_types_logits_agent = self._masked_normalize(action_types_logits_agent, action_type_masks)
+        action_types_logits_prior = self._masked_normalize(action_types_logits_prior, action_type_masks)
 
         #print ('action_types_logits before mask', action_types_logits_agent)
         action_probability_distribution = torch.distributions.Multinomial(1,probs = action_types_logits_agent)
@@ -530,8 +530,10 @@ class RL_LightningModule(pl.LightningModule):
     def sample_reaction_indices(self, reaction_logits_agent, reaction_logits_prior, reaction_masks=None):
 
         softmax=torch.nn.Softmax(dim=-1)
-        reaction_logits_agent = softmax(reaction_logits_agent)*reaction_masks
-        reaction_logits_prior = softmax(reaction_logits_prior)*reaction_masks
+        reaction_logits_agent = softmax(reaction_logits_agent)
+        reaction_logits_prior = softmax(reaction_logits_prior)
+        reaction_logits_agent = self._masked_normalize(reaction_logits_agent, reaction_masks)
+        reaction_logits_prior = self._masked_normalize(reaction_logits_prior, reaction_masks)
 
         reaction_distribution = torch.distributions.Multinomial(1,probs = reaction_logits_agent)
         reaction_sampled = reaction_distribution.sample()
@@ -544,14 +546,35 @@ class RL_LightningModule(pl.LightningModule):
 
     def sample_reagent_indices(self, reagent_logits_agent, reagent_logits_prior, reagent_masks=None):
         softmax=torch.nn.Softmax(dim=-1)
-        reagent_logits_agent = softmax(reagent_logits_agent)*reagent_masks
-        reagent_logits_prior = softmax(reagent_logits_prior)*reagent_masks
+        reagent_logits_agent = softmax(reagent_logits_agent)
+        reagent_logits_prior = softmax(reagent_logits_prior)
+        reagent_logits_agent = self._masked_normalize(reagent_logits_agent, reagent_masks)
+        reagent_logits_prior = self._masked_normalize(reagent_logits_prior, reagent_masks)
         reagent_distribution = torch.distributions.Multinomial(1,probs = reagent_logits_agent)
         reagent_sampled = reagent_distribution.sample()
         reagent_indices = torch.argmax(reagent_sampled,dim=-1, keepdim=True)
         agent_loglikelihoods = torch.log(reagent_logits_agent.gather(1, reagent_indices)+1e-10).squeeze(-1)
         prior_loglikelihoods = torch.log(reagent_logits_prior.gather(1, reagent_indices)+1e-10).squeeze(-1)
         return reagent_indices, agent_loglikelihoods, prior_loglikelihoods
+
+    @staticmethod
+    def _masked_normalize(probabilities: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        if mask is None:
+            return probabilities / (probabilities.sum(dim=-1, keepdim=True) + 1e-12)
+
+        masked_probs = probabilities * mask
+        row_sum = masked_probs.sum(dim=-1, keepdim=True)
+
+        fallback = mask.clone()
+        fallback_sum = fallback.sum(dim=-1, keepdim=True)
+        uniform = torch.full_like(probabilities, 1.0 / probabilities.size(-1))
+        fallback_probs = torch.where(
+            fallback_sum > 0,
+            fallback / (fallback_sum + 1e-12),
+            uniform,
+        )
+
+        return torch.where(row_sum > 0, masked_probs / (row_sum + 1e-12), fallback_probs)
 
     def update_actions(self, next_action_types, next_reaction_indices, next_reagents_indices, agent_action_likelihoods, agent_reaction_likelihoods, agent_reagent_likelihoods, prior_action_likelihoods, prior_reaction_likelihoods, prior_reagent_likelihoods):
         batchsize=next_action_types.shape[0]
@@ -610,16 +633,22 @@ class RL_LightningModule(pl.LightningModule):
                     reagent_mol=Chem.MolFromSmiles(reagent)
                     product=template.excute(fromstate_mol,reagent_mol)
 
-                    #print (f"**************")
-                    #print (i,product,reaction_type)
+                    required_patts = list(self.warhead_protected_patts)
+                    if reaction_type == "e3_connection":
+                        required_patts = required_patts + list(self.e3_ligand_protected_patts)
+                    selected_products = []
+                    for p in product:
+                        ok = self.action_searcher.product_keeps_protected_patterns_strict(fromstate_mol, p, required_patts)
+                        if ok:
+                            selected_products.append(p)
 
-                    if len(product)>0:
-                        self.current_smiles[i] = Chem.MolToSmiles(product[0])
+                    if len(selected_products)>0:
+                        self.current_smiles[i] = Chem.MolToSmiles(selected_products[0])
                         self.routes[i].append({'step': int(self.current_step_id[i].clone().detach().item()),
                                                 'reaction':template.name,
                                                 'from_state':fromstate, 
                                                 'reagent':reagent, 
-                                                'product':Chem.MolToSmiles(product[0]),
+                                                'product':Chem.MolToSmiles(selected_products[0]),
                                                 'reaction_type':reaction_type
                                                 })
                         

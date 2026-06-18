@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Notebooks
+.ipynb_checkpoints/
+
+# TensorBoard
+TensorBoard/
+
+# Model checkpoints
+*.ckpt
+
+# Generated data
+*.pkl
+*.tar.gz
+
+# Output files
+*.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environments
+env/
+venv/
+.env

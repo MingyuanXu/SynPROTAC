@@ -58,22 +58,19 @@ class ReactionTemplate:
 
         if len(active_atoms) ==0:
             active_atoms = list(range(mol.GetNumAtoms()))
-        
-        flag=False
-        for i,patt in enumerate(self.reaction.GetReactants()):
-            # 遍历所有匹配
-            for match in mol.GetSubstructMatches(patt):
-                for atom_idx in active_atoms:
-                    if atom_idx in match:
-                        flag = True
 
-        for i,patt in enumerate(self.reaction.GetReactants()):
-            for match in mol.GetSubstructMatches(patt):
-                for atom_idx in inactive_atoms:
-                    if atom_idx in match:
-                        flag = False
+        active_set = set(active_atoms)
+        inactive_set = set(inactive_atoms)
 
-        return flag
+        for patt in self.reaction.GetReactants():
+            for match in mol.GetSubstructMatches(patt):
+                match_set = set(match)
+                # A template is applicable if there exists at least one match
+                # that touches an active atom and avoids all inactive atoms.
+                if active_set.intersection(match_set) and not inactive_set.intersection(match_set):
+                    return True
+
+        return False
 
     def to_dict(self) -> Dict:
         """将模板转换为字典格式"""
@@ -96,6 +93,18 @@ class ReactionTemplate:
     def excute(self,mol1,mol2):
 
         avoid_parts=[Chem.MolFromSmiles(part) for part in GP.avoid_substructures]
+        # Keep motifs already present in inputs; only filter newly introduced avoid motifs.
+        avoid_baseline_counts = []
+        for part in avoid_parts:
+            if part is None:
+                avoid_baseline_counts.append(0)
+                continue
+            baseline = 0
+            if mol1 is not None:
+                baseline += len(mol1.GetSubstructMatches(part))
+            if mol2 is not None:
+                baseline += len(mol2.GetSubstructMatches(part))
+            avoid_baseline_counts.append(baseline)
 
         try:
             # 尝试不同的反应物顺序
@@ -116,9 +125,12 @@ class ReactionTemplate:
                             if product is not None:
                                 # 清理产物结构
                                 avoid_flag=False
-                                for part in avoid_parts:
-                                    if product.HasSubstructMatch(part):
+                                for part, baseline in zip(avoid_parts, avoid_baseline_counts):
+                                    if part is None:
+                                        continue
+                                    if len(product.GetSubstructMatches(part)) > baseline:
                                         avoid_flag=True
+                                        break
                                 if not avoid_flag:
                                     #try:
                                         Chem.SanitizeMol(product)

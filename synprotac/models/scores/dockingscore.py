@@ -10,7 +10,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import ProcessPoolExecutor
 import torch 
-from .scores import reverse_sigmoid_transformation
+from .scores import reverse_sigmoid_transformation, leaky_window_reverse_sigmoid_transformation
 from .suppress_output import suppress_output
 
 class DockingScore(BaseScore):
@@ -26,6 +26,9 @@ class DockingScore(BaseScore):
                  strained_energy_cutoff: float = -4.0,
                  name="DockingScore",
                  exhaustiveness: int = 8,
+                 score_transform: str = "reverse_sigmoid",
+                 outside_penalty: float = 0.25,
+                 score_clip_min: float = -1.0,
                  ):
 
         super().__init__()
@@ -37,6 +40,9 @@ class DockingScore(BaseScore):
         self.strained_energy_cutoff=strained_energy_cutoff
         self.name=name 
         self.exhaustiveness=exhaustiveness
+        self.score_transform=score_transform
+        self.outside_penalty=outside_penalty
+        self.score_clip_min=score_clip_min
         assert center is not None or reflig_sdf is not None, "Either center or reflig_sdf must be provided"
 
         if center is not None:
@@ -132,6 +138,21 @@ class DockingScore(BaseScore):
         
         affinity_scores = np.where(strained_energies<self.strained_energy_cutoff, 0, affinity_scores)
         
-        final_scores = reverse_sigmoid_transformation(affinity_scores, _low=self.low_threshold, _high=self.high_threshold, _k=0.25)
+        if self.score_transform == "leaky_window":
+            final_scores = leaky_window_reverse_sigmoid_transformation(
+                affinity_scores,
+                _low=self.low_threshold,
+                _high=self.high_threshold,
+                _k=0.25,
+                _outside_penalty=self.outside_penalty,
+                _clip_min=self.score_clip_min,
+            )
+        else:
+            final_scores = reverse_sigmoid_transformation(
+                affinity_scores,
+                _low=self.low_threshold,
+                _high=self.high_threshold,
+                _k=0.25,
+            )
 
         return torch.tensor(final_scores), torch.tensor(affinity_scores)

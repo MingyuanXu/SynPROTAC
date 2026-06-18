@@ -32,19 +32,54 @@ def reverse_sigmoid_transformation(scores,_low, _high, _k):
     transformed = [_reverse_sigmoid_formula(pred_val, _low, _high, _k) for pred_val in scores]
     return np.array(transformed, dtype=np.float32)
 
+def leaky_window_reverse_sigmoid_transformation(
+    scores,
+    _low,
+    _high,
+    _k=0.25,
+    _outside_penalty=0.25,
+    _clip_min=-1.0,
+):
+    """
+    Single-sided leaky-linear reward.
+
+    Piecewise definition:
+    - score <= _low: reward = 1.0
+    - _low < score <= _high: linearly mapped from 1.0 to 0.0
+    - score > _high: linear penalty with slope controlled by _outside_penalty
+
+    Notes:
+    - _k is kept for backward compatibility and is unused in this linear variant.
+    - _outside_penalty is the penalty slope (normalized by interval width).
+    """
+    scores_arr = np.asarray(scores, dtype=np.float32)
+    width = max(float(_high - _low), 1e-6)
+
+    transformed = np.empty_like(scores_arr, dtype=np.float32)
+    low_mask = scores_arr <= _low
+    window_mask = (scores_arr > _low) & (scores_arr <= _high)
+    high_mask = scores_arr > _high
+
+    transformed[low_mask] = 1.0
+    transformed[window_mask] = (_high - scores_arr[window_mask]) / width
+    transformed[high_mask] = -float(_outside_penalty) * (scores_arr[high_mask] - _high) / width
+
+    if _clip_min is not None:
+        transformed = np.maximum(transformed, float(_clip_min))
+
+    return transformed.astype(np.float32)
+
 class BaseScore:
     """Base class for molecular scoring components."""
     def __init__(self,):
         pass 
-    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0, rank: int = 0):
+    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0):
         """Compute scores for a list of molecules. Subclasses must implement this."""
         raise NotImplementedError
 
 class QEDScore(BaseScore):
     """Compute QED (Quantitative Estimate of Drug-likeness) scores."""
-    def __init__(self):
-        self.name="QED"
-    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0, rank: int = 0):
+    def compute_scores(self, mols: List[Chem.Mol], subset_id: int = 0):
         qed_scores = []
         for mol in mols:
             if mol:
@@ -64,9 +99,8 @@ class SimilarityScore(BaseScore):
         self.target_fps = [AllChem.GetMorganFingerprint(mol, 2, useCounts=True, useFeatures=True) for mol in self.target_mols if mol]
         self.tanimoto_k = tanimoto_k
         self.cutoff = cutoff
-        self.name="2D Similarity"
     
-    def compute_scores(self, mols: List[Chem.Mol],subset_id: int = 0, rank: int = 0 ): 
+    def compute_scores(self, mols: List[Chem.Mol],subset_id: int = 0): 
         scores=[]
         similarities = []
         for mol in mols:
@@ -80,5 +114,4 @@ class SimilarityScore(BaseScore):
                 score = 0.0
             scores.append(score)
             similarities.append(max_sim)
-        print (similarities)
         return torch.tensor(scores), torch.tensor(similarities)

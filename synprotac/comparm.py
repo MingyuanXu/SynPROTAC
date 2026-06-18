@@ -30,7 +30,7 @@ class GPARAMS():
         self.batchsize = 256
         self.CUDA_VISIBLE_DEVICES = "0,1"
         self.fp_dim=256 # for Morgan Finger Print
-        self.avoid_substructures=["C(=O)O","C(=O)OC(=O)"]
+        self.avoid_substructures=["C(=O)OC(=O)"]
         self.DockStream_root_path='/mnt_191/myxu/synprotac/envs/DockStream'
 
     def update(self):

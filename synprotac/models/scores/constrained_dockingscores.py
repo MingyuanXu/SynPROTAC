@@ -1,7 +1,7 @@
 from rdkit import Chem
 from .utils_rdkit import rdkit_center_of_mass ,move_molecule_to_target
 import numpy as np 
-from typing import List 
+from typing import List, Optional
 import os 
 from pathlib import Path
 from .scores import BaseScore
@@ -28,6 +28,10 @@ class Constrained_DockingScore(DockingScore):
                  name: str = "Constrained_DockingScore",
                  refine_only: bool = True,
                  exhaustiveness: int = 2,
+                 score_transform: str = "reverse_sigmoid",
+                 outside_penalty: float = 0.25,
+                 score_clip_min: float = -1.0,
+                 target_match_topk: Optional[int] = 6,
                  ):
 
         super().__init__(target_pdb=target_pdb,
@@ -39,12 +43,16 @@ class Constrained_DockingScore(DockingScore):
                          max_workers=max_workers,
                          strained_energy_cutoff=strained_energy_cutoff,
                          exhaustiveness=exhaustiveness,
+                         score_transform=score_transform,
+                         outside_penalty=outside_penalty,
+                         score_clip_min=score_clip_min,
                          )
         self.warhead_smiles=warhead_smiles
         self.e3_smiles=e3_smiles
         self.ref_protac=Chem.SDMolSupplier(reflig_sdf,removeHs=False)[0]
         self.name=name
         self.refine_only=refine_only
+        self.target_match_topk = target_match_topk
         return
 
     def prepare_constrained_ligands(self,ligand:Chem.Mol,output_path:Path, idx=0):
@@ -63,6 +71,7 @@ class Constrained_DockingScore(DockingScore):
             force_field="MMFF94",
             max_iterations=500,
             keep_hydrogens=True,
+            max_target_matches_per_constraint=self.target_match_topk,
         )
 
         optimized_mols = [opt.molecule for opt in optimized if opt.molecule is not None]

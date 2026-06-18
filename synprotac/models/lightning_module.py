@@ -229,6 +229,77 @@ class Action_Searcher:
                 if len(products)>0:
                     return True 
 
+
+    @staticmethod
+    def _pattern_to_mol(pattern: str):
+        mol = Chem.MolFromSmiles(pattern)
+        if mol is not None:
+            return mol
+        return Chem.MolFromSmarts(pattern)
+
+    @staticmethod
+    def _atom_local_signature(mol, atom_idx: int):
+        atom = mol.GetAtomWithIdx(atom_idx)
+        neighbors = []
+        for nbr in atom.GetNeighbors():
+            bond = mol.GetBondBetweenAtoms(atom_idx, nbr.GetIdx())
+            neighbors.append((
+                str(bond.GetBondType()),
+                nbr.GetAtomicNum(),
+                int(nbr.GetIsAromatic()),
+            ))
+        neighbors.sort()
+        return (
+            atom.GetAtomicNum(),
+            int(atom.GetIsAromatic()),
+            atom.GetFormalCharge(),
+            int(atom.GetTotalNumHs()),
+            tuple(neighbors),
+        )
+
+    def _pattern_match_signatures(self, mol, patt_mol):
+        signatures = set()
+        for match in mol.GetSubstructMatches(patt_mol):
+            sig = tuple(self._atom_local_signature(mol, idx) for idx in match)
+            signatures.add(sig)
+        return signatures
+
+    def product_keeps_protected_patterns(self, product_mol, protected_patts: List[str]) -> bool:
+        if product_mol is None or len(protected_patts) == 0:
+            return True
+        for patt in protected_patts:
+            patt_mol = self._pattern_to_mol(patt)
+            if patt_mol is None:
+                continue
+            if not product_mol.HasSubstructMatch(patt_mol):
+                return False
+        return True
+
+    def product_keeps_protected_patterns_strict(self, from_mol, product_mol, protected_patts: List[str]) -> bool:
+        """Strict check: protected substructure and local atom environments must be preserved."""
+        if from_mol is None or product_mol is None or len(protected_patts) == 0:
+            return True
+
+        for patt in protected_patts:
+            patt_mol = self._pattern_to_mol(patt)
+            if patt_mol is None:
+                continue
+
+            before_sigs = self._pattern_match_signatures(from_mol, patt_mol)
+            if len(before_sigs) == 0:
+                # Pattern not present in reactant; ignore this pattern for this step.
+                continue
+
+            after_sigs = self._pattern_match_signatures(product_mol, patt_mol)
+            if len(after_sigs) == 0:
+                return False
+
+            # Require at least one preserved match with identical local environment.
+            if before_sigs.isdisjoint(after_sigs):
+                return False
+
+        return True
+
 class SynthesisRouteLightningModule(pl.LightningModule):
     """PyTorch Lightning module for synthesis route generation."""
     
@@ -547,7 +618,8 @@ class SynthesisRouteLightningModule(pl.LightningModule):
     def sample_action_types(self,action_types_logits, action_type_masks=None):
         """Sample action types from logits."""
         softmax=torch.nn.Softmax(dim=-1)
-        action_types_logits = softmax(action_types_logits)#*action_type_masks
+        action_types_logits = softmax(action_types_logits)
+        action_types_logits = self._masked_normalize(action_types_logits, action_type_masks)
         action_probability_distribution = torch.distributions.Multinomial(1,probs = action_types_logits)
         action_types_sampled=action_probability_distribution.sample()
         action_types = torch.argmax(action_types_sampled, dim=-1, keepdim=True)
@@ -555,7 +627,8 @@ class SynthesisRouteLightningModule(pl.LightningModule):
 
     def sample_reaction_indices(self, reaction_logits, reaction_masks=None):
         softmax=torch.nn.Softmax(dim=-1)
-        reaction_logits = softmax(reaction_logits)*reaction_masks
+        reaction_logits = softmax(reaction_logits)
+        reaction_logits = self._masked_normalize(reaction_logits, reaction_masks)
         reaction_distribution = torch.distributions.Multinomial(1,probs = reaction_logits)
         reaction_sampled = reaction_distribution.sample()
         reaction_indices = torch.argmax(reaction_sampled,dim=-1, keepdim=True)
@@ -563,11 +636,31 @@ class SynthesisRouteLightningModule(pl.LightningModule):
 
     def sample_reagent_indices(self, reagent_logits, reagent_masks=None):
         softmax=torch.nn.Softmax(dim=-1)
-        reagent_logits = softmax(reagent_logits)*reagent_masks
+        reagent_logits = softmax(reagent_logits)
+        reagent_logits = self._masked_normalize(reagent_logits, reagent_masks)
         reagent_distribution = torch.distributions.Multinomial(1,probs = reagent_logits)
         reagent_sampled = reagent_distribution.sample()
         reagent_indices = torch.argmax(reagent_sampled,dim=-1, keepdim=True)
         return reagent_indices
+
+    @staticmethod
+    def _masked_normalize(probabilities: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        if mask is None:
+            return probabilities / (probabilities.sum(dim=-1, keepdim=True) + 1e-12)
+
+        masked_probs = probabilities * mask
+        row_sum = masked_probs.sum(dim=-1, keepdim=True)
+
+        fallback = mask.clone()
+        fallback_sum = fallback.sum(dim=-1, keepdim=True)
+        uniform = torch.full_like(probabilities, 1.0 / probabilities.size(-1))
+        fallback_probs = torch.where(
+            fallback_sum > 0,
+            fallback / (fallback_sum + 1e-12),
+            uniform,
+        )
+
+        return torch.where(row_sum > 0, masked_probs / (row_sum + 1e-12), fallback_probs)
 
     def update_actions(self, next_action_types, next_reaction_indices, next_reagents_indices):
         batchsize=next_action_types.shape[0]
@@ -604,13 +697,23 @@ class SynthesisRouteLightningModule(pl.LightningModule):
                     #print (f"**************")
                     #print (i,product,reaction_type)
 
-                    if len(product)>0:
-                        self.current_smiles[i] = Chem.MolToSmiles(product[0])
+                    required_patts = list(self.warhead_protected_patts)
+                    if reaction_type == "e3_connection":
+                        required_patts = required_patts + list(self.e3_ligand_protected_patts)
+                    selected_products = []
+                    for p in product:
+                        ok = self.action_searcher.product_keeps_protected_patterns_strict(fromstate_mol, p, required_patts)
+                        if ok:
+                            selected_products.append(p)
+
+                    if len(selected_products)>0:
+                        self.current_smiles[i] = Chem.MolToSmiles(selected_products[0])
+                        
                         self.routes[i].append({'step': int(self.current_step_id[i].clone().detach().item()),
                                                 'reaction':template.name,
                                                 'from_state':fromstate, 
                                                 'reagent':reagent, 
-                                                'product':Chem.MolToSmiles(product[0]),
+                                                'product':Chem.MolToSmiles(selected_products[0]),
                                                 'reaction_type':reaction_type
                                                 })
                         
@@ -631,10 +734,10 @@ class SynthesisRouteLightningModule(pl.LightningModule):
                             self.current_rollback_steps[i] = 2
         return
 
-    #def show_current_environment(self):
-    #    for i in range(len(self.current_smiles)):
-    #        print (f"*******************Molecule {i}**********************")
-    #        print (self.current_smiles[i])
-    #        print (self.current_reactions[i])
-    #        print (self.current_reagents[i])
+    def show_current_environment(self):
+        for i in range(len(self.current_smiles)):
+            print (f"*******************Molecule {i}**********************")
+            print (self.current_smiles[i])
+            print (self.current_reactions[i])
+            print (self.current_reagents[i])
 

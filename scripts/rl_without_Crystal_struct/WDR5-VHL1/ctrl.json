@@ -1,0 +1,6 @@
+{
+    "CUDA_VISIBLE_DEVICES":"6",
+    "batchsize":20,
+    "learning_rate":1e-5
+}
+
